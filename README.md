@@ -71,6 +71,28 @@ Everything below happens in the Cloudflare dashboard and the app's own admin pan
 2. **Turnstile (recommended)** — Cloudflare dashboard → Turnstile → *Add site* (type "Managed" is fine), then paste the two generated keys into `/admin/settings` on your board. Done — votes and submissions are now bot-checked. Until then the board works fine, but only rate limiting stands between you and bots.
 3. **Branding** — also in `/admin/settings`: board title, logo, accent color, and optionally a **webhook URL** to get pinged when a submission waits for moderation.
 
+## Updating your instance
+
+The repo copy the deploy button created is standalone — it has no link back to this repo, so GitHub won't offer a "Sync fork" button. To pull in a new Updrift version:
+
+```sh
+git clone git@github.com:YOU/your-updrift-copy.git && cd your-updrift-copy
+git remote add upstream https://github.com/Preclowski/updrift.git
+git fetch upstream
+git merge upstream/main
+git push
+```
+
+The push triggers Workers Builds, which redeploys and applies any new database migrations automatically (they're part of the deploy command). Your data and settings live in D1 and are untouched by redeploys.
+
+To force a redeploy without any new code — e.g. after changing build settings — either hit **Retry build** on the latest build in the dashboard (Workers & Pages → your worker → Builds), or push an empty commit:
+
+```sh
+git commit --allow-empty -m "redeploy" && git push
+```
+
+If you deployed via CLI instead, updating is just `git pull && npm run deploy`.
+
 ## Free tier: what happens at the limits
 
 Workers Free (100K requests/day, 10 ms CPU), D1 Free (5M row reads / 100K row writes per day), Turnstile, and Cloudflare Access (≤50 users) all have hard quotas: hitting them means requests fail **until the daily reset — not a bill**. You only start paying if you deliberately upgrade to Workers Paid. The app is built to stay inside the quotas: denormalized vote counters (no `COUNT(*)` per page view), 1–2 D1 queries per request, no per-request KV writes, in-memory per-IP rate limits on all write endpoints.
