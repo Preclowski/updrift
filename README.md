@@ -17,7 +17,7 @@ The whole thing is built to run on the **Cloudflare free tier** — and stay the
 - **Branding** (`/admin/settings`) — board title, logo URL, website link, accent color (with a color picker), webhook URL.
 - **Webhook notifications** — plain JSON POSTs on `feature.submitted` / `feature.approved` / `feature.done`. No email anywhere. Failures are swallowed, a dead webhook never breaks a request.
 - **Bot protection** — Cloudflare Turnstile (free) verified server-side on every submission and vote, plus per-IP rate limits on all write endpoints.
-- **Anonymous but stable voter identity** — a signed (HMAC) long-lived cookie; IPs are only ever salted-hashed for rate-limit keys, never stored. Identity is a single pluggable function ([src/identity.ts](src/identity.ts)) — if you ever need strict one-vote-per-account, the comment at the top of that file walks through swapping the cookie for OAuth or Cloudflare Access identity.
+- **Anonymous but stable voter identity** — a signed (HMAC) long-lived cookie; IPs are only ever salted-hashed for rate-limit keys, never stored.
 
 ### Tech
 
@@ -47,7 +47,7 @@ Other scripts: `npm test`, `npm run typecheck`, `npm run db:migrate`, `npm run d
 
 ## Deploying your own Updrift
 
-You **don't fork this repo** to run your own board. Pick one of three paths:
+You **don't fork this repo** to run your own board. Pick one of two paths:
 
 ### Option A — Deploy to Cloudflare button (easiest)
 
@@ -78,23 +78,13 @@ npm run deploy:remote                    # applies migrations remotely + wrangle
 
 Same deal as the button flow: the always-pass Turnstile test secret works fine for trying things out, just swap in a real key before sharing the board (see post-deploy steps).
 
-### Option C — GitHub Actions auto-deploy (for your own copy)
-
-This is for when you cloned manually (Option B) but still want push-to-deploy: you keep your copy on GitHub, CI runs the tests on every push, and merges to `main` deploy themselves — without handing Workers Builds access to your repo. If you came in through the deploy button, you already have auto-deploy via Workers Builds and can ignore this option.
-
-The repo ships two workflows:
-
-- **CI** ([.github/workflows/ci.yml](.github/workflows/ci.yml)) — typecheck + tests on every push/PR. Works out of the box.
-- **Deploy** ([.github/workflows/deploy.yml](.github/workflows/deploy.yml)) — deploys to Cloudflare on every push to `main`. It is **dormant by default**: without credentials it skips gracefully, so contributors' pushes don't fail. To activate it on your copy, set in repo settings:
-  - secret `CLOUDFLARE_API_TOKEN` — API token with the *Edit Cloudflare Workers* template plus D1 edit permission,
-  - secret `CLOUDFLARE_ACCOUNT_ID`,
-  - variable `D1_DATABASE_ID` — from `npx wrangler d1 create updrift-db` (the workflow injects it into `wrangler.jsonc` at deploy time, so the committed file keeps a placeholder).
-
-  The workflow applies D1 migrations and then deploys.
-
 ### Post-deploy steps (required)
 
-1. **Turnstile** — Cloudflare dashboard → Turnstile → *Add site* (type "Managed" is fine). Put the **site key** into `wrangler.jsonc` → `vars.TURNSTILE_SITE_KEY` and set the **secret key** via `npx wrangler secret put TURNSTILE_SECRET`. Until you do, the shipped test keys accept everyone (fine for trying it out, useless against bots).
+1. **Turnstile** — Cloudflare dashboard → Turnstile → *Add site* (type "Managed" is fine). You get two keys; where to put them depends on how you deployed:
+   - **Deploy button:** you set both during the setup flow. To change them later: the **secret key** lives in the dashboard (Workers & Pages → your worker → Settings → Variables and Secrets), and the **site key** in `wrangler.jsonc` in the repo copy Cloudflare created for you — edit it on GitHub, the push redeploys.
+   - **CLI:** put the site key in `wrangler.jsonc` → `vars.TURNSTILE_SITE_KEY`, run `npx wrangler secret put TURNSTILE_SECRET`, deploy again.
+
+   Until you use real keys, the shipped test keys accept everyone (fine for trying it out, useless against bots).
 2. **Cloudflare Access on `/admin/*`** — the app does **no login of its own**; it trusts the `Cf-Access-Authenticated-User-Email` header injected by Access. Without it, `/admin` is wide open:
    1. Zero Trust dashboard → **Access → Applications → Add application → Self-hosted** (free up to 50 users).
    2. Domain: your worker's domain, path: `admin` (covers `/admin/*`).
