@@ -155,7 +155,8 @@ admin.post("/settings", async (c) => {
   const form = await c.req.formData();
   const field = (name: string, max: number) => String(form.get(name) ?? "").trim().slice(0, max);
   await c.env.DB.prepare(
-    `UPDATE settings SET title = ?1, logo_url = ?2, website_url = ?3, accent_color = ?4, webhook_url = ?5 WHERE id = 1`,
+    `UPDATE settings SET title = ?1, logo_url = ?2, website_url = ?3, accent_color = ?4,
+       webhook_url = ?5, turnstile_site_key = ?6, turnstile_secret = ?7 WHERE id = 1`,
   )
     .bind(
       field("title", 80) || "Updrift",
@@ -163,6 +164,8 @@ admin.post("/settings", async (c) => {
       field("website_url", 500),
       field("accent_color", 40) || "#6366f1",
       field("webhook_url", 500),
+      field("turnstile_site_key", 100),
+      field("turnstile_secret", 100),
     )
     .run();
   return c.redirect("/admin/settings?saved=1", 303);

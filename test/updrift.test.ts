@@ -2,13 +2,19 @@ import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getVoterId } from "../src/identity";
 import { resetRateLimits } from "../src/rate-limit";
+import { ensureSecrets } from "../src/secrets";
+import { getSettings } from "../src/db";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-beforeEach(() => {
+beforeEach(async () => {
   resetRateLimits();
+  // Turnstile is configured at runtime via settings; enable it for the suite.
+  await env.DB.prepare(
+    "UPDATE settings SET turnstile_site_key = 'test-site-key', turnstile_secret = 'test-turnstile-secret' WHERE id = 1",
+  ).run();
   // The worker runs in the same isolate as the tests, so mocking the global
   // fetch intercepts its outbound subrequests (Turnstile siteverify).
   // Convention: token "good" verifies, anything else fails.
@@ -155,6 +161,17 @@ describe("voting", () => {
     expect((await voteCountInDb(id)).actual).toBe(0);
   });
 
+  it("accepts votes without a token when Turnstile is not configured", async () => {
+    await env.DB.prepare(
+      "UPDATE settings SET turnstile_site_key = '', turnstile_secret = '' WHERE id = 1",
+    ).run();
+    const id = await createFeature("approved");
+    const voter = await mintVoter();
+    const res = await vote(id, voter.cookie, { token: null });
+    expect(res.status).toBe(200);
+    expect((await voteCountInDb(id)).actual).toBe(1);
+  });
+
   it("rate limits repeated votes from one IP", async () => {
     const id = await createFeature("approved");
     const ip = "192.0.2.77";
@@ -217,6 +234,25 @@ describe("submission", () => {
       statuses.push((await submit(author.cookie, { title: `Spam idea ${i}` }, ip)).status);
     }
     expect(statuses.filter((s) => s === 429).length).toBeGreaterThan(0); // limit is 3/min
+  });
+});
+
+describe("runtime secrets", () => {
+  it("generates and persists the cookie key and IP salt on first use", async () => {
+    const first = await ensureSecrets(env.DB, await getSettings(env.DB), {});
+    expect(first.cookieSecret).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.ipSalt).toMatch(/^[0-9a-f]{64}$/);
+    // Stable on subsequent requests — read back from D1, not regenerated.
+    const again = await ensureSecrets(env.DB, await getSettings(env.DB), {});
+    expect(again).toEqual(first);
+  });
+
+  it("prefers explicit env overrides", async () => {
+    const s = await ensureSecrets(env.DB, await getSettings(env.DB), {
+      COOKIE_SECRET: "env-cookie",
+      IP_SALT: "env-salt",
+    });
+    expect(s).toEqual({ cookieSecret: "env-cookie", ipSalt: "env-salt" });
   });
 });
 

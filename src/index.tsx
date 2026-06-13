@@ -9,21 +9,43 @@ import {
   getRejectedFeatures,
   getSettings,
   VOTABLE_STATUSES,
+  type SettingsRow,
 } from "./db";
+import { ensureSecrets, type RuntimeSecrets } from "./secrets";
 import { Layout } from "./views/layout";
 import { Board, ClosedList, VoteControl } from "./views/board";
 import { admin } from "./admin";
 
 type AppEnv = {
   Bindings: Env;
-  Variables: { voter: VoterIdentity };
+  Variables: { voter: VoterIdentity; settings: SettingsRow; secrets: RuntimeSecrets };
 };
 
 const app = new Hono<AppEnv>();
 
-/** Resolve the (anonymous) voter identity and persist a fresh cookie if minted. */
+/**
+ * Per-request bootstrap: load settings (one D1 read shared by all handlers),
+ * resolve the self-generated runtime secrets, and establish the anonymous
+ * voter identity (persisting a fresh signed cookie if one was minted).
+ */
 app.use("*", async (c, next) => {
-  const voter = await getVoterId(c.req.raw, c.env);
+  let settings: SettingsRow;
+  try {
+    settings = await getSettings(c.env.DB);
+  } catch {
+    return c.text(
+      "Database not initialized. Run: npx wrangler d1 migrations apply DB --remote (or --local for dev).",
+      503,
+    );
+  }
+  const secrets = await ensureSecrets(
+    c.env.DB,
+    settings,
+    c.env as { COOKIE_SECRET?: string; IP_SALT?: string },
+  );
+  const voter = await getVoterId(c.req.raw, { COOKIE_SECRET: secrets.cookieSecret });
+  c.set("settings", settings);
+  c.set("secrets", secrets);
   c.set("voter", voter);
   await next();
   if (voter.setCookie) c.header("Set-Cookie", voter.setCookie);
@@ -36,13 +58,10 @@ app.route("/admin", admin);
 // ---------------------------------------------------------------------------
 
 app.get("/", async (c) => {
-  // Two D1 reads total: settings + board features (free-tier friendly).
-  const [settings, features] = await Promise.all([
-    getSettings(c.env.DB),
-    getBoardFeatures(c.env.DB, c.get("voter").voterId),
-  ]);
+  // Settings already loaded by the middleware; one more read for the board.
+  const features = await getBoardFeatures(c.env.DB, c.get("voter").voterId);
   return c.html(
-    <Layout settings={settings} siteKey={c.env.TURNSTILE_SITE_KEY}>
+    <Layout settings={c.get("settings")}>
       <Board features={features} submitted={c.req.query("submitted") === "1"} />
     </Layout>,
   );
@@ -62,7 +81,7 @@ const clientIp = (c: { req: { header(name: string): string | undefined } }) =>
   c.req.header("CF-Connecting-IP") ?? "0.0.0.0";
 
 app.post("/api/features", async (c) => {
-  const ip = await hashIp(clientIp(c), c.env.IP_SALT);
+  const ip = await hashIp(clientIp(c), c.get("secrets").ipSalt);
   if (!rateLimit(`submit:${ip}`, 3, 60_000)) {
     return c.text("Too many submissions — try again in a minute.", 429);
   }
@@ -74,8 +93,13 @@ app.post("/api/features", async (c) => {
     return c.text("Title must be 3–120 chars; description up to 2000.", 400);
   }
 
+  // Turnstile runs only when keys are configured in /admin/settings.
+  const turnstileSecret = c.get("settings").turnstile_secret;
   const token = form.get("cf-turnstile-response");
-  if (!(await verifyTurnstile(c.env.TURNSTILE_SECRET, typeof token === "string" ? token : null, clientIp(c)))) {
+  if (
+    turnstileSecret &&
+    !(await verifyTurnstile(turnstileSecret, typeof token === "string" ? token : null, clientIp(c)))
+  ) {
     return c.text("Bot check failed — please retry.", 400);
   }
 
@@ -93,16 +117,15 @@ app.post("/api/features", async (c) => {
   const feature = inserted?.results?.[0] as { id: number; title: string; vote_count: number };
 
   // Notify the maintainer there is something to moderate (fire-and-forget).
-  const settings = await getSettings(c.env.DB);
   c.executionCtx.waitUntil(
-    sendWebhook(settings.webhook_url, "feature.submitted", { ...feature, vote_count: 1 }),
+    sendWebhook(c.get("settings").webhook_url, "feature.submitted", { ...feature, vote_count: 1 }),
   );
 
   return c.redirect("/?submitted=1", 303);
 });
 
 app.post("/api/features/:id/vote", async (c) => {
-  const ip = await hashIp(clientIp(c), c.env.IP_SALT);
+  const ip = await hashIp(clientIp(c), c.get("secrets").ipSalt);
   if (!rateLimit(`vote:${ip}`, 12, 60_000)) {
     return c.text("Slow down — too many votes per minute.", 429);
   }
@@ -110,10 +133,13 @@ app.post("/api/features/:id/vote", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) return c.text("Not found", 404);
 
-  const form = await c.req.formData().catch(() => null);
-  const token = form?.get("cf-turnstile-response");
-  if (!(await verifyTurnstile(c.env.TURNSTILE_SECRET, typeof token === "string" ? token : null, clientIp(c)))) {
-    return c.text("Bot check failed — please retry.", 400);
+  const turnstileSecret = c.get("settings").turnstile_secret;
+  if (turnstileSecret) {
+    const form = await c.req.formData().catch(() => null);
+    const token = form?.get("cf-turnstile-response");
+    if (!(await verifyTurnstile(turnstileSecret, typeof token === "string" ? token : null, clientIp(c)))) {
+      return c.text("Bot check failed — please retry.", 400);
+    }
   }
 
   // Query 1: load + validate the target feature.
@@ -142,7 +168,7 @@ app.post("/api/features/:id/vote", async (c) => {
 });
 
 app.delete("/api/features/:id/vote", async (c) => {
-  const ip = await hashIp(clientIp(c), c.env.IP_SALT);
+  const ip = await hashIp(clientIp(c), c.get("secrets").ipSalt);
   if (!rateLimit(`vote:${ip}`, 12, 60_000)) {
     return c.text("Slow down — too many votes per minute.", 429);
   }

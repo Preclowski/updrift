@@ -224,6 +224,14 @@ export function AdminSettings(props: { settings: SettingsRow; saved: boolean }) 
         </div>
         <label>Webhook URL (POSTed JSON on new submissions / approvals; empty = off)</label>
         <input type="url" name="webhook_url" value={s.webhook_url} maxlength={500} />
+        <label>Turnstile site key (bot protection; both fields empty = off)</label>
+        <input type="text" name="turnstile_site_key" value={s.turnstile_site_key} maxlength={100} placeholder="0x4AAA…" />
+        <label>Turnstile secret key</label>
+        <input type="text" name="turnstile_secret" value={s.turnstile_secret} maxlength={100} placeholder="0x4AAA…" />
+        <p class="muted" style="margin:0.4rem 0 0">
+          Create both keys for free in the Cloudflare dashboard → Turnstile → Add site. Until
+          set, anyone (including bots) can vote and submit — rate limiting still applies.
+        </p>
         <div style="margin-top:0.8rem">
           <button class="primary" type="submit">
             Save settings

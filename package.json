@@ -5,8 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "deploy:remote": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply DB --local",
     "db:seed": "wrangler d1 execute DB --local --file=./seed.sql",
     "setup": "npm install && node -e \"const fs=require('fs');fs.existsSync('.dev.vars')||fs.copyFileSync('.dev.vars.example','.dev.vars')\" && npm run db:migrate && npm run db:seed",

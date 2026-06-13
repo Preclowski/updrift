@@ -30,6 +30,12 @@ export interface SettingsRow {
   website_url: string;
   accent_color: string;
   webhook_url: string;
+  /** Auto-generated on first request (see secrets.ts); never shown in the admin UI. */
+  cookie_secret: string | null;
+  ip_salt: string | null;
+  /** Empty string = Turnstile bot protection disabled. */
+  turnstile_site_key: string;
+  turnstile_secret: string;
 }
 
 export function getSettings(db: D1Database): Promise<SettingsRow> {

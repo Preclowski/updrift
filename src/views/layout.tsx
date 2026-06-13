@@ -36,10 +36,11 @@ details.closed-toggle > summary { cursor: pointer; color: #6b7280; font-size: 0.
 
 export function Layout(props: {
   settings: SettingsRow;
-  siteKey: string;
   children: Child;
 }) {
-  const { settings, siteKey } = props;
+  const { settings } = props;
+  // Empty site key = Turnstile not configured = bot protection off.
+  const siteKey = settings.turnstile_site_key;
   return (
     <html lang="en">
       <head>
@@ -51,11 +52,13 @@ export function Layout(props: {
           <style>{`:root { --accent: ${sanitizeColor(settings.accent_color)}; }`}</style>
         ) : null}
         <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
-        <script
-          src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=tsInit&render=explicit"
-          async
-          defer
-        ></script>
+        {siteKey ? (
+          <script
+            src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=tsInit&render=explicit"
+            async
+            defer
+          ></script>
+        ) : null}
       </head>
       <body>
         <header class="topbar">
@@ -73,7 +76,7 @@ export function Layout(props: {
         </header>
         <main class="wrap">{props.children}</main>
         {/* Invisible Turnstile widget, executed on demand before each vote. */}
-        <div id="ts-vote"></div>
+        {siteKey ? <div id="ts-vote"></div> : null}
         <script
           dangerouslySetInnerHTML={{ __html: clientJs(siteKey) }}
         ></script>
@@ -105,13 +108,16 @@ function tsInit() {
   if (formSlot) turnstile.render(formSlot, { sitekey: ${JSON.stringify(siteKey)} });
 }
 // Gate vote POSTs on a fresh Turnstile token (htmx async-confirm pattern).
+// When Turnstile is not configured (no script/widget), requests go through
+// untouched — the server skips verification too.
 document.body.addEventListener('htmx:confirm', function (e) {
   var el = e.detail.elt;
   if (!el.matches || !el.matches('[data-needs-token]')) return;
+  if (typeof turnstile === 'undefined' || tsWidget === null) return;
   if (tsToken) return; // already have an unused token
   e.preventDefault();
   tsWaiting = function () { e.detail.issueRequest(true); };
-  if (tsWidget !== null) turnstile.execute(tsWidget);
+  turnstile.execute(tsWidget);
 });
 document.body.addEventListener('htmx:configRequest', function (e) {
   if (e.detail.elt.matches && e.detail.elt.matches('[data-needs-token]') && tsToken) {

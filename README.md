@@ -16,7 +16,7 @@ The whole thing is built to run on the **Cloudflare free tier** — and stay the
 - **Stats** (`/admin/stats`) — moderation queue size, features by status, total votes, top 10 by votes, submissions over the last 7/30 days. (Page-view analytics belong in free [Cloudflare Web Analytics](https://www.cloudflare.com/web-analytics/), not in D1.)
 - **Branding** (`/admin/settings`) — board title, logo URL, website link, accent color (with a color picker), webhook URL.
 - **Webhook notifications** — plain JSON POSTs on `feature.submitted` / `feature.approved` / `feature.done`. No email anywhere. Failures are swallowed, a dead webhook never breaks a request.
-- **Bot protection** — Cloudflare Turnstile (free) verified server-side on every submission and vote, plus per-IP rate limits on all write endpoints.
+- **Bot protection** — per-IP rate limits on all write endpoints out of the box, plus optional Cloudflare Turnstile (free): paste your two Turnstile keys in `/admin/settings` and every vote and submission gets verified server-side.
 - **Anonymous but stable voter identity** — a signed (HMAC) long-lived cookie; IPs are only ever salted-hashed for rate-limit keys, never stored.
 
 ### Tech
@@ -32,16 +32,7 @@ npm run dev     # wrangler dev → http://localhost:8787
 
 Miniflare simulates D1 locally — zero cloud, zero cost. The public board is at `/`, the admin panel at `/admin` (locally authenticated via `DEV_ADMIN_EMAIL`).
 
-`.dev.vars` holds local secrets (git-ignored; see `.dev.vars.example`):
-
-| Variable | Purpose |
-| --- | --- |
-| `COOKIE_SECRET` | HMAC key signing the anonymous voter cookie |
-| `IP_SALT` | Salt for hashing client IPs for rate-limit keys (raw IPs are never stored) |
-| `TURNSTILE_SECRET` | Turnstile secret key (default: Cloudflare's always-pass test key) |
-| `DEV_ADMIN_EMAIL` | Pretends Cloudflare Access authenticated this email on `/admin/*`. Honored **only on localhost** — setting it in production does nothing. |
-
-`npm run setup` creates `.dev.vars` from the example automatically if it doesn't exist.
+**There are no secrets to configure.** The voter-cookie signing key and the IP-hash salt are random strings nobody should have to invent — the app generates them on the first request and stores them in D1. Turnstile keys live in `/admin/settings`. The only local variable is `DEV_ADMIN_EMAIL` in `.dev.vars` (created from `.dev.vars.example` by `npm run setup`): it fakes the Cloudflare Access identity on `/admin/*`, and is honored **only on localhost**, so it can't open `/admin` in production.
 
 Other scripts: `npm test`, `npm run typecheck`, `npm run db:migrate`, `npm run db:seed`, `npm run types` (regenerate binding types after editing `wrangler.jsonc`).
 
@@ -51,17 +42,9 @@ You **don't fork this repo** to run your own board. Pick one of two paths:
 
 ### Option A — Deploy to Cloudflare button (easiest)
 
-Click the button at the top. The setup flow:
+Click the button at the top and accept the defaults — there is nothing to fill in. The flow clones the repo **into your own GitHub/GitLab account** (a fresh copy, not a fork), provisions the D1 database, runs the schema migrations as part of the pre-filled deploy command, and wires up Workers Builds so every push to your copy redeploys. If it offers to set `DEV_ADMIN_EMAIL`, skip it — that's a local-dev variable, ignored in production.
 
-1. **Clones the repo into your own GitHub/GitLab account** — a fresh copy, not a fork — and wires up Workers Builds, so every push to your copy redeploys automatically.
-2. **Provisions the D1 database** declared in `wrangler.jsonc` and injects the generated `database_id` for you.
-3. **Asks for configuration before deploying.** You'll be prompted for the public `TURNSTILE_SITE_KEY` var and the secrets listed in [.dev.vars.example](.dev.vars.example):
-   - `COOKIE_SECRET`, `IP_SALT` — paste any long random strings (e.g. `openssl rand -hex 32`),
-   - `TURNSTILE_SECRET` — your Turnstile secret key, or temporarily keep the always-pass test value and swap it later in the dashboard (Workers → Settings → Variables and Secrets),
-   - `DEV_ADMIN_EMAIL` — **skip it.** It's a local-dev convenience and is ignored outside localhost anyway.
-4. **Runs migrations on deploy** — the deploy command is pre-populated from this repo's `deploy:remote` script (`wrangler d1 migrations apply DB --remote && wrangler deploy`); just accept it.
-
-**There is no default password.** Admin access doesn't use passwords at all: until you configure Cloudflare Access (step below), `/admin` simply returns 403 for everyone — the app fails closed, not open. Finish with the [post-deploy steps](#post-deploy-steps-required).
+**There are no secrets and no default password.** Internal keys generate themselves on first request, and admin access doesn't use passwords at all: until you configure Cloudflare Access (step below), `/admin` returns 403 for everyone — the app fails closed, not open. Finish with the [post-deploy steps](#post-deploy-steps-required).
 
 ### Option B — Clone + CLI (no GitHub involved at all)
 
@@ -69,29 +52,24 @@ Deployment is just `wrangler` talking to your Cloudflare account — the git rem
 
 ```sh
 git clone git@github.com:Preclowski/updrift.git && cd updrift && npm install
-npx wrangler d1 create updrift-db        # paste the returned database_id into wrangler.jsonc
-npx wrangler secret put COOKIE_SECRET    # long random string
-npx wrangler secret put IP_SALT          # long random string
-npx wrangler secret put TURNSTILE_SECRET # real key, or the test value from .dev.vars.example for now
-npm run deploy:remote                    # applies migrations remotely + wrangler deploy
+npx wrangler d1 create updrift-db   # paste the returned database_id into wrangler.jsonc
+npm run deploy                      # applies migrations remotely + wrangler deploy
 ```
 
-Same deal as the button flow: the always-pass Turnstile test secret works fine for trying things out, just swap in a real key before sharing the board (see post-deploy steps).
+No secrets to set here either.
 
 ### Post-deploy steps (required)
 
-1. **Turnstile** — Cloudflare dashboard → Turnstile → *Add site* (type "Managed" is fine). You get two keys; where to put them depends on how you deployed:
-   - **Deploy button:** you set both during the setup flow. To change them later: the **secret key** lives in the dashboard (Workers & Pages → your worker → Settings → Variables and Secrets), and the **site key** in `wrangler.jsonc` in the repo copy Cloudflare created for you — edit it on GitHub, the push redeploys.
-   - **CLI:** put the site key in `wrangler.jsonc` → `vars.TURNSTILE_SITE_KEY`, run `npx wrangler secret put TURNSTILE_SECRET`, deploy again.
+Everything below happens in the Cloudflare dashboard and the app's own admin panel — no files, no CLI.
 
-   Until you use real keys, the shipped test keys accept everyone (fine for trying it out, useless against bots).
-2. **Cloudflare Access on `/admin/*`** — the app does **no login of its own**; it trusts the `Cf-Access-Authenticated-User-Email` header injected by Access. Without it, `/admin` is wide open:
+1. **Cloudflare Access on `/admin/*`** — the app does **no login of its own**; it trusts the `Cf-Access-Authenticated-User-Email` header injected by Access. Until you set this up, `/admin` returns 403 for everyone:
    1. Zero Trust dashboard → **Access → Applications → Add application → Self-hosted** (free up to 50 users).
    2. Domain: your worker's domain, path: `admin` (covers `/admin/*`).
    3. Policy: *Allow* → *Emails* → your email. The default one-time-PIN login works immediately; Google/GitHub IdPs can be added in Zero Trust settings.
 
    With Access in place the header can't be spoofed (requests can't bypass Cloudflare's edge). The local `DEV_ADMIN_EMAIL` bypass is hard-coded to work only on localhost, so it cannot be abused in production.
-3. **Settings** — open `/admin/settings`: board title, logo, accent color, and optionally a **webhook URL** to get pinged when a submission waits for moderation.
+2. **Turnstile (recommended)** — Cloudflare dashboard → Turnstile → *Add site* (type "Managed" is fine), then paste the two generated keys into `/admin/settings` on your board. Done — votes and submissions are now bot-checked. Until then the board works fine, but only rate limiting stands between you and bots.
+3. **Branding** — also in `/admin/settings`: board title, logo, accent color, and optionally a **webhook URL** to get pinged when a submission waits for moderation.
 
 ## Free tier: what happens at the limits
 

@@ -1,16 +1,5 @@
 # Copy to .dev.vars for local development (npm run setup does this for you).
-# The same names are presented as secrets in the "Deploy to Cloudflare" flow.
-
-# HMAC key signing the anonymous voter cookie. Production: any long random string.
-COOKIE_SECRET="dev-cookie-secret-change-me"
-
-# Salt for hashing client IPs for rate-limit keys (raw IPs are never stored).
-# Production: any long random string.
-IP_SALT="dev-ip-salt-change-me"
-
-# Cloudflare Turnstile secret key. This test value always passes verification —
-# replace with a real key (Cloudflare dashboard → Turnstile) to actually block bots.
-TURNSTILE_SECRET="1x0000000000000000000000000000000AA"
+# No secrets are required — runtime keys are auto-generated into the local D1.
 
 # LOCAL DEV ONLY: pretend Cloudflare Access authenticated this user on /admin/*.
 # Ignored outside localhost, so it cannot open /admin in production —

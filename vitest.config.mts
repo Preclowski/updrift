@@ -11,9 +11,9 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,
+            // Env overrides so tests can mint voter cookies with a known key.
             COOKIE_SECRET: "test-cookie-secret",
             IP_SALT: "test-ip-salt",
-            TURNSTILE_SECRET: "test-turnstile-secret",
             // Neutralize the .dev.vars admin bypass so auth tests fail closed.
             DEV_ADMIN_EMAIL: "",
           },
