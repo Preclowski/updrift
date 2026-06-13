@@ -20,7 +20,9 @@ jobs:
         run: npm ci
 
       - name: Generate worker types
-        run: npm run types
+        # .dev.vars is git-ignored but wrangler types reads secret names from it,
+        # so recreate it from the example to get the same Env type as local dev.
+        run: cp .dev.vars.example .dev.vars && npm run types
 
       - name: Typecheck
         run: npm run typecheck
