@@ -1,0 +1,48 @@
+# Keeps deployed Updrift instances up to date with the source repo.
+#
+# This workflow only does something in COPIES of Updrift (created by the
+# Deploy to Cloudflare button or a fork) — in the source repo it is skipped.
+# Once a day (and on demand via "Run workflow") it merges the latest upstream
+# main and pushes; the push triggers Workers Builds, which redeploys and
+# applies any new D1 migrations. Board data and settings live in D1 and are
+# untouched by updates.
+#
+# Don't want automatic updates? Delete this file from your copy, or disable
+# the workflow in the Actions tab. You can still update manually any time.
+
+name: Update Updrift
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.repository != 'Preclowski/updrift'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Merge upstream and push
+        run: |
+          git config user.name "updrift-updater"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Preclowski/updrift.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date."
+            exit 0
+          fi
+          if git merge --no-edit upstream/main; then
+            git push
+            echo "Updated to $(git rev-parse --short upstream/main); Workers Builds will redeploy."
+          else
+            echo "::error::Your copy has local changes that conflict with the upstream update. Resolve the merge manually: git fetch upstream && git merge upstream/main"
+            exit 1
+          fi

@@ -73,23 +73,12 @@ Everything below happens in the Cloudflare dashboard and the app's own admin pan
 
 ## Updating your instance
 
-The repo copy the deploy button created is standalone — it has no link back to this repo, so GitHub won't offer a "Sync fork" button. To pull in a new Updrift version:
+**Instances update themselves.** Your copy ships with an [auto-update workflow](.github/workflows/auto-update.yml) that once a day merges the latest Updrift from this repo and pushes; the push makes Workers Builds redeploy, including any new database migrations. Your board data and settings live in D1 and survive every update.
 
-```sh
-git clone git@github.com:YOU/your-updrift-copy.git && cd your-updrift-copy
-git remote add upstream https://github.com/Preclowski/updrift.git
-git fetch upstream
-git merge upstream/main
-git push
-```
-
-The push triggers Workers Builds, which redeploys and applies any new database migrations automatically (they're part of the deploy command). Your data and settings live in D1 and are untouched by redeploys.
-
-To force a redeploy without any new code — e.g. after changing build settings — either hit **Retry build** on the latest build in the dashboard (Workers & Pages → your worker → Builds), or push an empty commit:
-
-```sh
-git commit --allow-empty -m "redeploy" && git push
-```
+- **Update right now:** your repo on GitHub → Actions → *Update Updrift* → *Run workflow*.
+- **Opt out of auto-updates:** delete `.github/workflows/auto-update.yml` from your copy (or disable the workflow in the Actions tab) and run it manually when you feel like it.
+- **If you changed the code yourself** and an update conflicts with your changes, the workflow fails with a note — resolve it like any git merge (`git fetch upstream && git merge upstream/main`).
+- **Force a redeploy without new code:** dashboard → Workers & Pages → your worker → Builds → *Retry build*, or push an empty commit.
 
 If you deployed via CLI instead, updating is just `git pull && npm run deploy`.
 
