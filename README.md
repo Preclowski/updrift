@@ -1,6 +1,8 @@
 # Updrift
 
-A lightweight, self-hosted **feature-voting board** that runs entirely on the **Cloudflare free tier** — and stays there. Visitors browse feature ideas, vote on them, and submit new ones; a maintainer moderates everything from a panel protected by Cloudflare Access. If you ever exceed the free limits, the app pauses until the daily reset — **you never get a bill** unless you consciously switch your account to Workers Paid.
+A lightweight, self-hosted **feature-voting board**. Visitors browse feature ideas, vote on them, and submit new ones; submissions go through a moderation queue before they appear publicly, and a maintainer manages everything from an admin panel protected by Cloudflare Access.
+
+The whole thing is built to run on the **Cloudflare free tier** — and stay there. Hosting your own board costs nothing, and if you ever exceed the free limits, the app simply pauses until the daily reset: **you never get a bill** unless you consciously switch your account to Workers Paid.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Preclowski/updrift)
 
@@ -15,11 +17,11 @@ A lightweight, self-hosted **feature-voting board** that runs entirely on the **
 - **Branding** (`/admin/settings`) — board title, logo URL, website link, accent color (with a color picker), webhook URL.
 - **Webhook notifications** — plain JSON POSTs on `feature.submitted` / `feature.approved` / `feature.done`. No email anywhere. Failures are swallowed, a dead webhook never breaks a request.
 - **Bot protection** — Cloudflare Turnstile (free) verified server-side on every submission and vote, plus per-IP rate limits on all write endpoints.
-- **Anonymous but stable voter identity** — a signed (HMAC) long-lived cookie; IPs are only ever salted-hashed for rate-limit keys, never stored. Pluggable: see [Swapping anonymous identity for OAuth](#swapping-anonymous-identity-for-oauth).
+- **Anonymous but stable voter identity** — a signed (HMAC) long-lived cookie; IPs are only ever salted-hashed for rate-limit keys, never stored. Identity is a single pluggable function ([src/identity.ts](src/identity.ts)) — if you ever need strict one-vote-per-account, the comment at the top of that file walks through swapping the cookie for OAuth or Cloudflare Access identity.
 
 ### Tech
 
-Hono on Cloudflare Workers · server-side rendered `hono/jsx` + HTMX (no React, no build step, no client framework) · D1 (SQLite) with raw prepared statements (no ORM) · `vote_count` denormalized and kept in sync by DB triggers in the same transaction as the vote insert · 1–2 D1 queries per request · vitest + `@cloudflare/vitest-pool-workers` running tests on real workerd.
+The backend is Hono running on Cloudflare Workers, talking to D1 (SQLite) through raw prepared statements — no ORM. Pages are rendered server-side with `hono/jsx`, and the only client-side moving part is HTMX swapping in HTML fragments after a vote; there is no React, no bundler, no build step. The vote counter is denormalized onto the feature row and kept in sync by database triggers in the same transaction as the vote insert, so a page view costs one or two D1 queries and never scans the votes table. Tests run on the real workerd runtime via vitest and `@cloudflare/vitest-pool-workers`.
 
 ## Local development
 
@@ -70,11 +72,15 @@ git clone git@github.com:Preclowski/updrift.git && cd updrift && npm install
 npx wrangler d1 create updrift-db        # paste the returned database_id into wrangler.jsonc
 npx wrangler secret put COOKIE_SECRET    # long random string
 npx wrangler secret put IP_SALT          # long random string
-npx wrangler secret put TURNSTILE_SECRET # from the Turnstile dashboard, see below
+npx wrangler secret put TURNSTILE_SECRET # real key, or the test value from .dev.vars.example for now
 npm run deploy:remote                    # applies migrations remotely + wrangler deploy
 ```
 
+Same deal as the button flow: the always-pass Turnstile test secret works fine for trying things out, just swap in a real key before sharing the board (see post-deploy steps).
+
 ### Option C — GitHub Actions auto-deploy (for your own copy)
+
+This is for when you cloned manually (Option B) but still want push-to-deploy: you keep your copy on GitHub, CI runs the tests on every push, and merges to `main` deploy themselves — without handing Workers Builds access to your repo. If you came in through the deploy button, you already have auto-deploy via Workers Builds and can ignore this option.
 
 The repo ships two workflows:
 
@@ -101,28 +107,3 @@ The repo ships two workflows:
 
 Workers Free (100K requests/day, 10 ms CPU), D1 Free (5M row reads / 100K row writes per day), Turnstile, and Cloudflare Access (≤50 users) all have hard quotas: hitting them means requests fail **until the daily reset — not a bill**. You only start paying if you deliberately upgrade to Workers Paid. The app is built to stay inside the quotas: denormalized vote counters (no `COUNT(*)` per page view), 1–2 D1 queries per request, no per-request KV writes, in-memory per-IP rate limits on all write endpoints.
 
-## Swapping anonymous identity for OAuth
-
-Voter identity is one pluggable function — `getVoterId(request, env)` in [src/identity.ts](src/identity.ts) — returning an opaque, stable `voter_id` string; nothing else in the app knows how identity works. For strong "one vote per account":
-
-1. Add an OAuth flow (GitHub/Google), or put the whole site behind Cloudflare Access and read `Cf-Access-Authenticated-User-Email`.
-2. In `getVoterId`, return a stable account-derived id (e.g. `github:<user-id>`) instead of the cookie id, and redirect unauthenticated users to login instead of letting them vote.
-3. Existing anonymous votes keep working — they're just different `voter_id` values.
-
-A step-by-step comment lives at the top of `src/identity.ts`.
-
-## Project layout
-
-```
-.github/workflows/    CI (typecheck + tests) and optional auto-deploy
-migrations/           D1 schema (incl. triggers keeping vote_count in sync)
-seed.sql              sample data for local dev
-src/index.tsx         public routes: board, closed list, submit + vote API
-src/admin.tsx         /admin routes (behind Cloudflare Access)
-src/identity.ts       pluggable voter identity (signed cookie; OAuth notes)
-src/turnstile.ts      server-side Turnstile verification
-src/rate-limit.ts     in-memory per-IP sliding window
-src/webhook.ts        fire-and-forget webhook notifications
-src/views/            hono/jsx SSR views (public board, admin, fragments)
-test/                 vitest + @cloudflare/vitest-pool-workers (real workerd)
-```
