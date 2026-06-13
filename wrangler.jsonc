@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "updrift",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-06-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "updrift-db",
+      // Placeholder — replace with the real ID from `wrangler d1 create updrift-db` before deploying.
+      // Local dev (Miniflare) ignores this and uses .wrangler/state.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    // Public Turnstile site key. The value below is Cloudflare's "always passes" test key —
+    // replace with your real site key in production (e.g. via an env override or editing here).
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+  }
+  // Secrets (set via `wrangler secret put` in prod, .dev.vars locally):
+  //   COOKIE_SECRET     — HMAC key for signing the anonymous voter cookie
+  //   IP_SALT           — salt for hashing client IPs (rate limiting); raw IPs are never stored
+  //   TURNSTILE_SECRET  — Turnstile secret key
+}
